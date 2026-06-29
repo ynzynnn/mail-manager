@@ -88,15 +88,15 @@ export default function Dashboard({ token, API_URL, sysStatus }) {
   return (
     <div>
       <div style={{ marginBottom: '2rem' }}>
-        <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>Mail Server Overview</h2>
-        <p style={{ color: '#94a3b8' }}>Real-time SMTP status and resources monitor.</p>
+        <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>SMTP Server Overview</h2>
+        <p style={{ color: '#94a3b8' }}>Real-time SMTP status and queue monitor.</p>
       </div>
 
       {/* Counters Grid */}
       <div className="card-grid">
         <div className="card">
           <div className="card-header-row">
-            <span className="card-title">Mail Domains</span>
+            <span className="card-title">SMTP Domains</span>
             <div className="icon-wrapper">
               <Globe size={20} />
             </div>
@@ -107,18 +107,18 @@ export default function Dashboard({ token, API_URL, sysStatus }) {
 
         <div className="card">
           <div className="card-header-row">
-            <span className="card-title">Email Accounts</span>
+            <span className="card-title">SMTP Accounts</span>
             <div className="icon-wrapper blue">
               <Mail size={20} />
             </div>
           </div>
           <div className="card-value">{stats.mailboxes}</div>
-          <div className="card-desc">Active Dovecot mailboxes</div>
+          <div className="card-desc">Active SMTP authentication credentials</div>
         </div>
 
         <div className="card">
           <div className="card-header-row">
-            <span className="card-title">Aliases & Forwards</span>
+            <span className="card-title">Routing Aliases</span>
             <div className="icon-wrapper success">
               <List size={20} />
             </div>
@@ -195,11 +195,11 @@ export default function Dashboard({ token, API_URL, sysStatus }) {
           <div className="panel-card" style={{ padding: '1.5rem', margin: 0, flex: 1 }}>
             <h3 style={{ fontSize: '1.15rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <HardDrive size={18} style={{ color: '#00A8FF' }} />
-              Storage Quota Allocation
+              Queue & Log Storage
             </h3>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-              <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Allocated Disk Usage</span>
+              <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Disk Space Allocation</span>
               <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>{getStoragePercentage()}%</span>
             </div>
             
@@ -215,11 +215,11 @@ export default function Dashboard({ token, API_URL, sysStatus }) {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.85rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Total Provisioned Quota:</span>
+                <span style={{ color: '#64748b' }}>Provisioned Max Quota:</span>
                 <span>{formatBytes(stats.storage.total)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Actual Bytes Inboxes Used:</span>
+                <span style={{ color: '#64748b' }}>Queue & Log Bytes Used:</span>
                 <span>{formatBytes(stats.storage.used)}</span>
               </div>
             </div>
@@ -228,21 +228,21 @@ export default function Dashboard({ token, API_URL, sysStatus }) {
           <div className="panel-card" style={{ padding: '1.5rem', margin: 0 }}>
             <h3 style={{ fontSize: '1.15rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <ShieldCheck size={18} style={{ color: '#10b981' }} />
-              Daemon Services
+              SMTP Daemon Ports
             </h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.85rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: '#94a3b8' }}>SMTP MTA (Postfix)</span>
-                <span className="badge badge-success"><span className="badge-dot"></span> Port 25 / 587</span>
+                <span style={{ color: '#94a3b8' }}>SMTP Mail Transport (Postfix)</span>
+                <span className="badge badge-success"><span className="badge-dot"></span> Port 25</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: '#94a3b8' }}>IMAP server (Dovecot)</span>
-                <span className="badge badge-success"><span className="badge-dot"></span> Port 143 / 993</span>
+                <span style={{ color: '#94a3b8' }}>SMTP Submission (Postfix TLS)</span>
+                <span className="badge badge-success"><span className="badge-dot"></span> Port 587</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: '#94a3b8' }}>Spam Filter (Rspamd)</span>
-                <span className="badge badge-success"><span className="badge-dot"></span> Port 11334</span>
+                <span style={{ color: '#94a3b8' }}>SMTP Secure SSL (Postfix)</span>
+                <span className="badge badge-success"><span className="badge-dot"></span> Port 465</span>
               </div>
             </div>
           </div>

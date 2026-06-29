@@ -4,13 +4,10 @@ import {
   Plus, 
   Trash2, 
   ShieldAlert, 
-  Key, 
   Settings, 
-  Check, 
   UserPlus, 
   Power,
-  RefreshCw,
-  Sliders
+  RefreshCw
 } from 'lucide-react';
 
 export default function MailboxManager({ token, API_URL }) {
@@ -24,17 +21,17 @@ export default function MailboxManager({ token, API_URL }) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddAliasModal, setShowAddAliasModal] = useState(false);
 
-  // Add Mailbox Form State
+  // Add Account Form State
   const [newUsername, setNewUsername] = useState('');
   const [newDomain, setNewDomain] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [newQuotaGb, setNewQuotaGb] = useState(2); // default 2GB
+  const [newSendLimit, setNewSendLimit] = useState(2000); // default 2000 emails/day
   const [mailboxError, setMailboxError] = useState('');
 
-  // Edit Mailbox State
+  // Edit Account State
   const [selectedMailbox, setSelectedMailbox] = useState(null);
   const [editPassword, setEditPassword] = useState('');
-  const [editQuotaGb, setEditQuotaGb] = useState(2);
+  const [editSendLimit, setEditSendLimit] = useState(2000);
   const [editError, setEditError] = useState('');
 
   // Add Alias Form State
@@ -50,7 +47,7 @@ export default function MailboxManager({ token, API_URL }) {
     try {
       const headers = { Authorization: `Bearer ${token}` };
       
-      // Fetch Mailboxes
+      // Fetch SMTP Accounts (represented by mailboxes table)
       const resMailboxes = await fetch(`${API_URL}/mailboxes`, { headers });
       const dataMailboxes = await resMailboxes.json();
       
@@ -77,12 +74,25 @@ export default function MailboxManager({ token, API_URL }) {
   };
 
   const generateRandomPassword = () => {
-    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+';
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()';
     let pass = '';
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 14; i++) {
       pass += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return pass;
+  };
+
+  // Convert legacy DB quota values or emails limit values
+  const getLimitAndUsed = (mb) => {
+    // If quota_bytes is standard large byte count (e.g. 2GB), map it to a readable email count limit
+    const limit = mb.quota_bytes > 1000000 ? Math.round(mb.quota_bytes / 1024 / 1024) : mb.quota_bytes;
+    const used = mb.bytes_used > 1000000 ? Math.round(mb.bytes_used / 1024 / 1024) : mb.bytes_used;
+    return { limit, used };
+  };
+
+  const getLimitPercent = (used, limit) => {
+    if (!limit) return 0;
+    return Math.min(100, Math.round((used / limit) * 100));
   };
 
   const handleAddMailbox = async (e) => {
@@ -94,7 +104,8 @@ export default function MailboxManager({ token, API_URL }) {
       return;
     }
 
-    const quota_bytes = newQuotaGb * 1024 * 1024 * 1024;
+    // Store raw send limit in quota_bytes field directly
+    const quota_bytes = newSendLimit;
 
     try {
       const res = await fetch(`${API_URL}/mailboxes`, {
@@ -114,11 +125,11 @@ export default function MailboxManager({ token, API_URL }) {
       if (res.ok) {
         setNewUsername('');
         setNewPassword('');
-        setNewQuotaGb(2);
+        setNewSendLimit(2000);
         setShowAddMailboxModal(false);
         fetchData();
       } else {
-        setMailboxError(data.error || 'Failed to create mailbox');
+        setMailboxError(data.error || 'Failed to create SMTP account');
       }
     } catch (err) {
       setMailboxError('Network connection error');
@@ -129,7 +140,7 @@ export default function MailboxManager({ token, API_URL }) {
     e.preventDefault();
     setEditError('');
 
-    const quota_bytes = editQuotaGb * 1024 * 1024 * 1024;
+    const quota_bytes = editSendLimit;
     const body = { quota_bytes };
     if (editPassword) {
       body.password = editPassword;
@@ -150,7 +161,7 @@ export default function MailboxManager({ token, API_URL }) {
         fetchData();
       } else {
         const data = await res.json();
-        setEditError(data.error || 'Failed to update mailbox');
+        setEditError(data.error || 'Failed to update SMTP credentials');
       }
     } catch (err) {
       setEditError('Network connection error');
@@ -177,7 +188,7 @@ export default function MailboxManager({ token, API_URL }) {
   };
 
   const handleDeleteMailbox = async (email) => {
-    if (!window.confirm(`Are you sure you want to permanently delete the mailbox ${email}? All emails in the inbox will be lost.`)) {
+    if (!window.confirm(`Are you sure you want to permanently delete the SMTP credentials for ${email}?`)) {
       return;
     }
     try {
@@ -245,24 +256,10 @@ export default function MailboxManager({ token, API_URL }) {
     }
   };
 
-  const formatBytes = (bytes, decimals = 1) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-  };
-
-  const getQuotaPercent = (used, quota) => {
-    if (!quota) return 0;
-    return Math.min(100, Math.round((used / quota) * 100));
-  };
-
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
-        <p style={{ color: '#94a3b8' }}>Loading mail accounts...</p>
+        <p style={{ color: '#94a3b8' }}>Loading SMTP accounts...</p>
       </div>
     );
   }
@@ -271,8 +268,8 @@ export default function MailboxManager({ token, API_URL }) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <div>
-          <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>Mailboxes & Accounts</h2>
-          <p style={{ color: '#94a3b8' }}>Manage virtual mailboxes, SMTP login credentials, quotas and forwardings.</p>
+          <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>SMTP Accounts</h2>
+          <p style={{ color: '#94a3b8' }}>Manage SMTP login credentials, daily sending limits, and forwarding redirects.</p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
           <button 
@@ -287,14 +284,14 @@ export default function MailboxManager({ token, API_URL }) {
             className="btn btn-primary" 
             onClick={() => {
               if (domains.length === 0) {
-                alert('Please add a domain first before creating mail accounts.');
+                alert('Please add an SMTP domain first before creating accounts.');
                 return;
               }
               setShowAddMailboxModal(true);
             }}
           >
             <UserPlus size={18} />
-            New Mailbox
+            New SMTP Account
           </button>
         </div>
       </div>
@@ -313,18 +310,18 @@ export default function MailboxManager({ token, API_URL }) {
           gap: '0.75rem'
         }}>
           <ShieldAlert size={20} />
-          <span>You need to configure a <strong>Domain Name</strong> before creating mailboxes. Head to the domains tab first.</span>
+          <span>You need to configure an <strong>SMTP Domain Name</strong> before creating credentials. Head to the domains tab first.</span>
         </div>
       )}
 
-      {/* Mailbox List */}
-      <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#f8fafc' }}>Active Mailboxes</h3>
+      {/* SMTP Accounts List */}
+      <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#f8fafc' }}>Active SMTP Credentials</h3>
       <div className="table-container" style={{ marginBottom: '3rem' }}>
         <table>
           <thead>
             <tr>
-              <th>Email Address</th>
-              <th>Quota & Storage Usage</th>
+              <th>SMTP Login / Email</th>
+              <th>Daily Sending Volume</th>
               <th>Status</th>
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
@@ -333,12 +330,13 @@ export default function MailboxManager({ token, API_URL }) {
             {mailboxes.length === 0 ? (
               <tr>
                 <td colSpan="4" style={{ textAlign: 'center', color: '#64748b', padding: '3rem' }}>
-                  No mailboxes created yet. Click "New Mailbox" to register one.
+                  No SMTP accounts created yet. Click "New SMTP Account" to register one.
                 </td>
               </tr>
             ) : (
               mailboxes.map((mb) => {
-                const percent = getQuotaPercent(mb.bytes_used, mb.quota_bytes);
+                const { limit, used } = getLimitAndUsed(mb);
+                const percent = getLimitPercent(used, limit);
                 return (
                   <tr key={mb.id}>
                     <td style={{ fontWeight: 600 }}>
@@ -350,7 +348,7 @@ export default function MailboxManager({ token, API_URL }) {
                     <td>
                       <div style={{ maxWidth: '280px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
-                          <span>{formatBytes(mb.bytes_used)} of {formatBytes(mb.quota_bytes)}</span>
+                          <span>{used.toLocaleString()} / {limit.toLocaleString()} emails/day</span>
                           <span>{percent}%</span>
                         </div>
                         <div className="stat-bar-container" style={{ height: '5px' }}>
@@ -373,7 +371,7 @@ export default function MailboxManager({ token, API_URL }) {
                       <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
                         <button 
                           className="btn btn-secondary btn-sm"
-                          title="Suspend/Activate"
+                          title={mb.status === 'active' ? 'Deactivate Credentials' : 'Activate Credentials'}
                           onClick={() => handleToggleStatus(mb.email, mb.status)}
                         >
                           <Power size={12} style={{ color: mb.status === 'active' ? '#ef4444' : '#10b981' }} />
@@ -382,7 +380,8 @@ export default function MailboxManager({ token, API_URL }) {
                           className="btn btn-secondary btn-sm"
                           onClick={() => {
                             setSelectedMailbox(mb);
-                            setEditQuotaGb(Math.round(mb.quota_bytes / 1024 / 1024 / 1024));
+                            const { limit } = getLimitAndUsed(mb);
+                            setEditSendLimit(limit);
                             setShowEditModal(true);
                           }}
                         >
@@ -406,7 +405,7 @@ export default function MailboxManager({ token, API_URL }) {
       </div>
 
       {/* Aliases List */}
-      <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#f8fafc' }}>Virtual Forwarding Aliases</h3>
+      <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#f8fafc' }}>Virtual Routing Aliases</h3>
       <div className="table-container">
         <table>
           <thead>
@@ -421,7 +420,7 @@ export default function MailboxManager({ token, API_URL }) {
             {aliases.length === 0 ? (
               <tr>
                 <td colSpan="4" style={{ textAlign: 'center', color: '#64748b', padding: '2rem' }}>
-                  No virtual mail aliases or forwarders defined.
+                  No virtual routing aliases or forwarders defined.
                 </td>
               </tr>
             ) : (
@@ -448,11 +447,11 @@ export default function MailboxManager({ token, API_URL }) {
         </table>
       </div>
 
-      {/* Modal: Add Mailbox */}
+      {/* Modal: Add SMTP Account */}
       {showAddMailboxModal && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 className="modal-title">Create Mail Account</h3>
+            <h3 className="modal-title">Create SMTP Credentials</h3>
             
             {mailboxError && (
               <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
@@ -463,11 +462,11 @@ export default function MailboxManager({ token, API_URL }) {
             <form onSubmit={handleAddMailbox}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '0.5rem', alignItems: 'end', marginBottom: '1.25rem' }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label>Username</label>
+                  <label>Login Username</label>
                   <input 
                     type="text" 
                     className="form-input" 
-                    placeholder="john.doe" 
+                    placeholder="smtp.user" 
                     value={newUsername}
                     onChange={(e) => setNewUsername(e.target.value)}
                     required
@@ -489,7 +488,7 @@ export default function MailboxManager({ token, API_URL }) {
               </div>
 
               <div className="form-group">
-                <label>Password</label>
+                <label>SMTP Password</label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input 
                     type="text" 
@@ -511,20 +510,21 @@ export default function MailboxManager({ token, API_URL }) {
               </div>
 
               <div className="form-group">
-                <label>Mailbox Storage Limit: <strong style={{ color: '#00A8FF' }}>{newQuotaGb} GB</strong></label>
+                <label>Daily Sending Limit: <strong style={{ color: '#00A8FF' }}>{newSendLimit.toLocaleString()} emails/day</strong></label>
                 <input 
                   type="range" 
-                  min="1" 
-                  max="10" 
+                  min="500" 
+                  max="10000" 
+                  step="500"
                   className="form-input"
                   style={{ padding: 0 }}
-                  value={newQuotaGb} 
-                  onChange={(e) => setNewQuotaGb(parseInt(e.target.value))}
+                  value={newSendLimit} 
+                  onChange={(e) => setNewSendLimit(parseInt(e.target.value))}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                  <span>1 GB</span>
-                  <span>5 GB</span>
-                  <span>10 GB</span>
+                  <span>500/day</span>
+                  <span>5,000/day</span>
+                  <span>10,000/day</span>
                 </div>
               </div>
 
@@ -533,7 +533,7 @@ export default function MailboxManager({ token, API_URL }) {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  Create Mailbox
+                  Create SMTP Account
                 </button>
               </div>
             </form>
@@ -541,11 +541,11 @@ export default function MailboxManager({ token, API_URL }) {
         </div>
       )}
 
-      {/* Modal: Edit Mailbox (Quota / Password) */}
+      {/* Modal: Edit SMTP Account (Limit / Password) */}
       {showEditModal && selectedMailbox && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 className="modal-title">Configure Mailbox: {selectedMailbox.email}</h3>
+            <h3 className="modal-title">Configure SMTP: {selectedMailbox.email}</h3>
 
             {editError && (
               <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
@@ -555,7 +555,7 @@ export default function MailboxManager({ token, API_URL }) {
 
             <form onSubmit={handleEditMailboxSubmit}>
               <div className="form-group">
-                <label>Reset Password (leave empty to keep current)</label>
+                <label>Reset SMTP Password (leave empty to keep current)</label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input 
                     type="text" 
@@ -575,20 +575,21 @@ export default function MailboxManager({ token, API_URL }) {
               </div>
 
               <div className="form-group">
-                <label>Adjust Storage Quota: <strong style={{ color: '#00A8FF' }}>{editQuotaGb} GB</strong></label>
+                <label>Adjust Daily Sending Limit: <strong style={{ color: '#00A8FF' }}>{editSendLimit.toLocaleString()} emails/day</strong></label>
                 <input 
                   type="range" 
-                  min="1" 
-                  max="10" 
+                  min="500" 
+                  max="10000" 
+                  step="500"
                   className="form-input"
                   style={{ padding: 0 }}
-                  value={editQuotaGb} 
-                  onChange={(e) => setEditQuotaGb(parseInt(e.target.value))}
+                  value={editSendLimit} 
+                  onChange={(e) => setEditSendLimit(parseInt(e.target.value))}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                  <span>1 GB</span>
-                  <span>5 GB</span>
-                  <span>10 GB</span>
+                  <span>500/day</span>
+                  <span>5,000/day</span>
+                  <span>10,000/day</span>
                 </div>
               </div>
 
@@ -609,7 +610,7 @@ export default function MailboxManager({ token, API_URL }) {
       {showAddAliasModal && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 className="modal-title">New Forwarding Alias</h3>
+            <h3 className="modal-title">New Virtual Redirect Alias</h3>
 
             {aliasError && (
               <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
@@ -619,7 +620,7 @@ export default function MailboxManager({ token, API_URL }) {
 
             <form onSubmit={handleAddAlias}>
               <div className="form-group">
-                <label>Source Address (Email which receives mail)</label>
+                <label>Source SMTP Address (Receiving alias)</label>
                 <input 
                   type="email" 
                   className="form-input" 
@@ -631,7 +632,7 @@ export default function MailboxManager({ token, API_URL }) {
               </div>
 
               <div className="form-group">
-                <label>Destination Address (Where emails will redirect to)</label>
+                <label>Destination Address (Where emails redirect to)</label>
                 <input 
                   type="email" 
                   className="form-input" 

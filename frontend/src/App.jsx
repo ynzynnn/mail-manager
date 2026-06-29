@@ -107,7 +107,7 @@ export default function App() {
           <div className="login-logo">
             <span>SEPTACLOUD</span> Mail
           </div>
-          <div className="login-title">Mail Server Manager</div>
+          <div className="login-title">SMTP Server Manager</div>
           
           {authError && (
             <div style={{ 
@@ -154,7 +154,7 @@ export default function App() {
             </div>
             
             <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
-              Sign In to Mail Panel
+              Sign In to SMTP Panel
             </button>
           </form>
         </div>
@@ -172,7 +172,7 @@ export default function App() {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <span>SEPTACLOUD</span> Mail
+          <span>SEPTACLOUD</span> SMTP
         </div>
         
         <ul className="sidebar-menu">
@@ -191,7 +191,7 @@ export default function App() {
               onClick={() => setActiveView('domains')}
             >
               <Globe size={18} />
-              Domains
+              SMTP Domains
             </a>
           </li>
           <li>
@@ -200,7 +200,7 @@ export default function App() {
               onClick={() => setActiveView('mailboxes')}
             >
               <Mail size={18} />
-              Mailboxes & Accounts
+              SMTP Accounts
             </a>
           </li>
           <li>
@@ -260,7 +260,7 @@ export default function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <ShieldCheck size={20} className="text-primary" style={{ color: '#00A8FF' }} />
           <span style={{ fontSize: '0.9rem', fontWeight: 500, color: '#94a3b8' }}>
-            Postfix + Dovecot SMTP Server Active
+            Postfix SMTP MTA Active
           </span>
         </div>
         
