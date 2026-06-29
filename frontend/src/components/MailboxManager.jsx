@@ -1,71 +1,54 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Mail, 
+  Server, 
   Plus, 
   Trash2, 
-  ShieldAlert, 
-  Settings, 
-  UserPlus, 
-  Power,
-  RefreshCw
+  RefreshCw, 
+  Mail, 
+  Send,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 export default function MailboxManager({ token, API_URL }) {
-  const [mailboxes, setMailboxes] = useState([]);
-  const [aliases, setAliases] = useState([]);
-  const [domains, setDomains] = useState([]);
+  const [smtps, setSmtps] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showTestModal, setShowTestModal] = useState(false);
 
-  // Modals state
-  const [showAddMailboxModal, setShowAddMailboxModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showAddAliasModal, setShowAddAliasModal] = useState(false);
+  // Add SMTP Profile Form State
+  const [name, setName] = useState('');
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState('587');
+  const [secure, setSecure] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [addError, setAddError] = useState('');
 
-  // Add Account Form State
-  const [newUsername, setNewUsername] = useState('');
-  const [newDomain, setNewDomain] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [newSendLimit, setNewSendLimit] = useState(2000); // default 2000 emails/day
-  const [mailboxError, setMailboxError] = useState('');
+  // Send Test Mail Form State
+  const [selectedSmtp, setSelectedSmtp] = useState(null);
+  const [recipient, setRecipient] = useState('');
+  const [subject, setSubject] = useState('SMTP Connection Test Mail');
+  const [body, setBody] = useState('');
+  const [sendLoading, setSendLoading] = useState(false);
+  const [sendError, setSendError] = useState('');
 
-  // Edit Account State
-  const [selectedMailbox, setSelectedMailbox] = useState(null);
-  const [editPassword, setEditPassword] = useState('');
-  const [editSendLimit, setEditSendLimit] = useState(2000);
-  const [editError, setEditError] = useState('');
-
-  // Add Alias Form State
-  const [aliasSource, setAliasSource] = useState('');
-  const [aliasDest, setAliasDest] = useState('');
-  const [aliasError, setAliasError] = useState('');
+  // Connection Handshake testing state
+  const [verifyingId, setVerifyingId] = useState(null);
 
   useEffect(() => {
-    fetchData();
+    fetchSmtps();
   }, []);
 
-  const fetchData = async () => {
+  const fetchSmtps = async () => {
     try {
-      const headers = { Authorization: `Bearer ${token}` };
-      
-      // Fetch SMTP Accounts (represented by mailboxes table)
-      const resMailboxes = await fetch(`${API_URL}/mailboxes`, { headers });
-      const dataMailboxes = await resMailboxes.json();
-      
-      // Fetch Aliases
-      const resAliases = await fetch(`${API_URL}/aliases`, { headers });
-      const dataAliases = await resAliases.json();
-      
-      // Fetch Domains (to populate select list)
-      const resDomains = await fetch(`${API_URL}/domains`, { headers });
-      const dataDomains = await resDomains.json();
-
-      if (resMailboxes.ok) setMailboxes(dataMailboxes);
-      if (resAliases.ok) setAliases(dataAliases);
-      if (resDomains.ok) {
-        setDomains(dataDomains);
-        if (dataDomains.length > 0) {
-          setNewDomain(dataDomains[0].name);
-        }
+      const res = await fetch(`${API_URL}/smtps`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSmtps(data);
       }
       setLoading(false);
     } catch (err) {
@@ -73,186 +56,127 @@ export default function MailboxManager({ token, API_URL }) {
     }
   };
 
-  const generateRandomPassword = () => {
-    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()';
-    let pass = '';
-    for (let i = 0; i < 14; i++) {
-      pass += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return pass;
-  };
-
-  // Convert legacy DB quota values or emails limit values
-  const getLimitAndUsed = (mb) => {
-    // If quota_bytes is standard large byte count (e.g. 2GB), map it to a readable email count limit
-    const limit = mb.quota_bytes > 1000000 ? Math.round(mb.quota_bytes / 1024 / 1024) : mb.quota_bytes;
-    const used = mb.bytes_used > 1000000 ? Math.round(mb.bytes_used / 1024 / 1024) : mb.bytes_used;
-    return { limit, used };
-  };
-
-  const getLimitPercent = (used, limit) => {
-    if (!limit) return 0;
-    return Math.min(100, Math.round((used / limit) * 100));
-  };
-
-  const handleAddMailbox = async (e) => {
+  const handleAddSmtp = async (e) => {
     e.preventDefault();
-    setMailboxError('');
+    setAddError('');
 
-    if (!newUsername || !newDomain || !newPassword) {
-      setMailboxError('Please fill in all fields');
+    if (!name || !host || !port || !username || !password) {
+      setAddError('All fields are required');
       return;
     }
 
-    // Store raw send limit in quota_bytes field directly
-    const quota_bytes = newSendLimit;
-
     try {
-      const res = await fetch(`${API_URL}/mailboxes`, {
+      const res = await fetch(`${API_URL}/smtps`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ 
-          username: newUsername.trim().toLowerCase(), 
-          domain: newDomain, 
-          password: newPassword,
-          quota_bytes 
+          name, 
+          host: host.trim(), 
+          port: parseInt(port), 
+          secure, 
+          username: username.trim(), 
+          password 
         })
       });
       const data = await res.json();
       if (res.ok) {
-        setNewUsername('');
-        setNewPassword('');
-        setNewSendLimit(2000);
-        setShowAddMailboxModal(false);
-        fetchData();
+        setName('');
+        setHost('');
+        setPort('587');
+        setSecure(false);
+        setUsername('');
+        setPassword('');
+        setShowAddModal(false);
+        fetchSmtps();
       } else {
-        setMailboxError(data.error || 'Failed to create SMTP account');
+        setAddError(data.error || 'Failed to create SMTP Profile');
       }
     } catch (err) {
-      setMailboxError('Network connection error');
+      setAddError('Network error connecting to backend');
     }
   };
 
-  const handleEditMailboxSubmit = async (e) => {
-    e.preventDefault();
-    setEditError('');
-
-    const quota_bytes = editSendLimit;
-    const body = { quota_bytes };
-    if (editPassword) {
-      body.password = editPassword;
-    }
-
+  const handleVerifySmtp = async (id) => {
+    setVerifyingId(id);
     try {
-      const res = await fetch(`${API_URL}/mailboxes/${selectedMailbox.email}`, {
-        method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify(body)
+      const res = await fetch(`${API_URL}/smtps/${id}/verify`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
       });
+      const data = await res.json();
       if (res.ok) {
-        setEditPassword('');
-        setShowEditModal(false);
-        fetchData();
-      } else {
-        const data = await res.json();
-        setEditError(data.error || 'Failed to update SMTP credentials');
+        if (data.success) {
+          alert('Handshake Successful! SMTP configuration is verified online.');
+        } else {
+          alert('Verification Failed:\n' + data.error);
+        }
+        fetchSmtps();
       }
     } catch (err) {
-      setEditError('Network connection error');
+      alert('Verification request failed. Connection error.');
+    } finally {
+      setVerifyingId(null);
     }
   };
 
-  const handleToggleStatus = async (email, currentStatus) => {
-    const nextStatus = currentStatus === 'active' ? 'suspended' : 'active';
-    try {
-      const res = await fetch(`${API_URL}/mailboxes/${email}`, {
-        method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ status: nextStatus })
-      });
-      if (res.ok) {
-        fetchData();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleDeleteMailbox = async (email) => {
-    if (!window.confirm(`Are you sure you want to permanently delete the SMTP credentials for ${email}?`)) {
+  const handleDeleteSmtp = async (id, profileName) => {
+    if (!window.confirm(`Are you sure you want to delete the SMTP profile "${profileName}"?`)) {
       return;
     }
+
     try {
-      const res = await fetch(`${API_URL}/mailboxes/${email}`, {
+      const res = await fetch(`${API_URL}/smtps/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
-        fetchData();
+        fetchSmtps();
       }
     } catch (err) {
       console.error(err);
     }
   };
 
-  const handleAddAlias = async (e) => {
+  const handleSendTestMail = async (e) => {
     e.preventDefault();
-    setAliasError('');
+    setSendError('');
+    setSendLoading(true);
 
-    if (!aliasSource || !aliasDest) {
-      setAliasError('Please fill in both fields');
+    if (!recipient) {
+      setSendError('Recipient email is required');
+      setSendLoading(false);
       return;
     }
 
     try {
-      const res = await fetch(`${API_URL}/aliases`, {
+      const res = await fetch(`${API_URL}/smtps/${selectedSmtp.id}/send-test`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ 
-          source_email: aliasSource.trim().toLowerCase(), 
-          destination_email: aliasDest.trim().toLowerCase() 
-        })
+        body: JSON.stringify({ recipient, subject, body })
       });
       const data = await res.json();
       if (res.ok) {
-        setAliasSource('');
-        setAliasDest('');
-        setShowAddAliasModal(false);
-        fetchData();
+        if (data.success) {
+          alert('Email successfully dispatched! Check the recipient\'s inbox.');
+          setRecipient('');
+          setBody('');
+          setShowTestModal(false);
+        } else {
+          setSendError(data.error || 'Failed to dispatch email');
+        }
       } else {
-        setAliasError(data.error || 'Failed to create virtual alias');
+        setSendError(data.error || 'Internal server error');
       }
     } catch (err) {
-      setAliasError('Network connection error');
-    }
-  };
-
-  const handleDeleteAlias = async (source_email) => {
-    if (!window.confirm(`Are you sure you want to delete alias forwarding rule from ${source_email}?`)) {
-      return;
-    }
-    try {
-      const res = await fetch(`${API_URL}/aliases/${source_email}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        fetchData();
-      }
-    } catch (err) {
-      console.error(err);
+      setSendError('Network connection error');
+    } finally {
+      setSendLoading(false);
     }
   };
 
@@ -268,177 +192,90 @@ export default function MailboxManager({ token, API_URL }) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <div>
-          <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>SMTP Accounts</h2>
-          <p style={{ color: '#94a3b8' }}>Manage SMTP login credentials, daily sending limits, and forwarding redirects.</p>
+          <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>SMTP Profiles</h2>
+          <p style={{ color: '#94a3b8' }}>Register external SMTP credentials. Test connection handshakes and dispatch test emails.</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button 
-            className="btn btn-secondary" 
-            onClick={() => setShowAddAliasModal(true)}
-            disabled={domains.length === 0}
-          >
-            <Plus size={18} />
-            Create Alias
-          </button>
-          <button 
-            className="btn btn-primary" 
-            onClick={() => {
-              if (domains.length === 0) {
-                alert('Please add an SMTP domain first before creating accounts.');
-                return;
-              }
-              setShowAddMailboxModal(true);
-            }}
-          >
-            <UserPlus size={18} />
-            New SMTP Account
-          </button>
-        </div>
+        <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
+          <Plus size={18} />
+          Add SMTP Profile
+        </button>
       </div>
 
-      {domains.length === 0 && (
-        <div style={{ 
-          backgroundColor: 'rgba(245, 158, 11, 0.1)', 
-          color: '#f59e0b', 
-          border: '1px solid rgba(245, 158, 11, 0.2)', 
-          padding: '1rem', 
-          borderRadius: '10px', 
-          marginBottom: '2rem',
-          fontSize: '0.9rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem'
-        }}>
-          <ShieldAlert size={20} />
-          <span>You need to configure an <strong>SMTP Domain Name</strong> before creating credentials. Head to the domains tab first.</span>
-        </div>
-      )}
-
-      {/* SMTP Accounts List */}
-      <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#f8fafc' }}>Active SMTP Credentials</h3>
-      <div className="table-container" style={{ marginBottom: '3rem' }}>
+      {/* SMTP Profile List */}
+      <div className="table-container">
         <table>
           <thead>
             <tr>
-              <th>SMTP Login / Email</th>
-              <th>Daily Sending Volume</th>
+              <th>Profile Name</th>
+              <th>Server Host</th>
+              <th>Port</th>
+              <th>Auth Username</th>
               <th>Status</th>
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {mailboxes.length === 0 ? (
+            {smtps.length === 0 ? (
               <tr>
-                <td colSpan="4" style={{ textAlign: 'center', color: '#64748b', padding: '3rem' }}>
-                  No SMTP accounts created yet. Click "New SMTP Account" to register one.
+                <td colSpan="6" style={{ textAlign: 'center', color: '#64748b', padding: '3rem' }}>
+                  No SMTP Profiles configured yet. Click "Add SMTP Profile" to register one.
                 </td>
               </tr>
             ) : (
-              mailboxes.map((mb) => {
-                const { limit, used } = getLimitAndUsed(mb);
-                const percent = getLimitPercent(used, limit);
-                return (
-                  <tr key={mb.id}>
-                    <td style={{ fontWeight: 600 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <Mail size={16} style={{ color: '#00A8FF' }} />
-                        {mb.email}
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ maxWidth: '280px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
-                          <span>{used.toLocaleString()} / {limit.toLocaleString()} emails/day</span>
-                          <span>{percent}%</span>
-                        </div>
-                        <div className="stat-bar-container" style={{ height: '5px' }}>
-                          <div 
-                            className="stat-bar" 
-                            style={{ 
-                              width: `${percent}%`,
-                              background: percent > 85 ? 'var(--danger)' : percent > 60 ? 'var(--warning)' : 'var(--color-primary)'
-                            }}
-                          ></div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`badge ${mb.status === 'active' ? 'badge-success' : 'badge-danger'}`}>
-                        <span className="badge-dot"></span> {mb.status}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
-                        <button 
-                          className="btn btn-secondary btn-sm"
-                          title={mb.status === 'active' ? 'Deactivate Credentials' : 'Activate Credentials'}
-                          onClick={() => handleToggleStatus(mb.email, mb.status)}
-                        >
-                          <Power size={12} style={{ color: mb.status === 'active' ? '#ef4444' : '#10b981' }} />
-                        </button>
-                        <button 
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => {
-                            setSelectedMailbox(mb);
-                            const { limit } = getLimitAndUsed(mb);
-                            setEditSendLimit(limit);
-                            setShowEditModal(true);
-                          }}
-                        >
-                          <Settings size={12} />
-                          Edit
-                        </button>
-                        <button 
-                          className="btn btn-danger btn-sm"
-                          onClick={() => handleDeleteMailbox(mb.email)}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Aliases List */}
-      <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#f8fafc' }}>Virtual Routing Aliases</h3>
-      <div className="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>Sender / Source Address</th>
-              <th>Destination Redirects To</th>
-              <th>Domain</th>
-              <th style={{ textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {aliases.length === 0 ? (
-              <tr>
-                <td colSpan="4" style={{ textAlign: 'center', color: '#64748b', padding: '2rem' }}>
-                  No virtual routing aliases or forwarders defined.
-                </td>
-              </tr>
-            ) : (
-              aliases.map((al) => (
-                <tr key={al.id}>
-                  <td>
-                    <strong style={{ color: '#00A8FF' }}>{al.source_email}</strong>
+              smtps.map((smtp) => (
+                <tr key={smtp.id}>
+                  <td style={{ fontWeight: 600 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <Server size={18} style={{ color: '#00A8FF' }} />
+                      {smtp.name}
+                    </div>
                   </td>
-                  <td>{al.destination_email}</td>
-                  <td><code>{al.domain}</code></td>
+                  <td><code>{smtp.host}</code></td>
+                  <td>
+                    <span className="badge badge-secondary" style={{ backgroundColor: '#1e293b', color: '#94a3b8' }}>
+                      {smtp.port} {smtp.secure === 1 ? '(SSL)' : ''}
+                    </span>
+                  </td>
+                  <td>{smtp.username}</td>
+                  <td>
+                    <span className={`badge ${
+                      smtp.status === 'verified' ? 'badge-success' : 
+                      smtp.status === 'failed' ? 'badge-danger' : 'badge-warning'
+                    }`}>
+                      <span className="badge-dot"></span> {smtp.status}
+                    </span>
+                  </td>
                   <td style={{ textAlign: 'right' }}>
-                    <button 
-                      className="btn btn-danger btn-sm"
-                      onClick={() => handleDeleteAlias(al.source_email)}
-                    >
-                      <Trash2 size={12} />
-                      Remove
-                    </button>
+                    <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
+                      <button 
+                        className="btn btn-secondary btn-sm"
+                        title="Check Handshake Connection"
+                        onClick={() => handleVerifySmtp(smtp.id)}
+                        disabled={verifyingId === smtp.id}
+                      >
+                        {verifyingId === smtp.id ? <RefreshCw size={12} className="animate-spin" /> : 'Verify'}
+                      </button>
+                      <button 
+                        className="btn btn-secondary btn-sm"
+                        title="Send Test Email"
+                        onClick={() => {
+                          setSelectedSmtp(smtp);
+                          setRecipient('');
+                          setBody('');
+                          setSendError('');
+                          setShowTestModal(true);
+                        }}
+                      >
+                        <Send size={12} />
+                        Test Email
+                      </button>
+                      <button 
+                        className="btn btn-danger btn-sm"
+                        onClick={() => handleDeleteSmtp(smtp.id, smtp.name)}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -447,93 +284,106 @@ export default function MailboxManager({ token, API_URL }) {
         </table>
       </div>
 
-      {/* Modal: Add SMTP Account */}
-      {showAddMailboxModal && (
+      {/* Add SMTP Profile Modal */}
+      {showAddModal && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 className="modal-title">Create SMTP Credentials</h3>
+            <h3 className="modal-title">Configure SMTP Connection</h3>
             
-            {mailboxError && (
+            {addError && (
               <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
-                {mailboxError}
+                {addError}
               </div>
             )}
 
-            <form onSubmit={handleAddMailbox}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '0.5rem', alignItems: 'end', marginBottom: '1.25rem' }}>
+            <form onSubmit={handleAddSmtp}>
+              <div className="form-group">
+                <label>Profile Friendly Name</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  placeholder="Gmail Server, Corporate Mail, etc." 
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label>Login Username</label>
+                  <label>SMTP Host</label>
                   <input 
                     type="text" 
                     className="form-input" 
-                    placeholder="smtp.user" 
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
+                    placeholder="smtp.gmail.com" 
+                    value={host}
+                    onChange={(e) => setHost(e.target.value)}
                     required
                   />
                 </div>
-                <div style={{ paddingBottom: '0.65rem', fontSize: '1.25rem', color: '#64748b' }}>@</div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label>Domain</label>
-                  <select 
-                    className="form-input"
-                    value={newDomain}
-                    onChange={(e) => setNewDomain(e.target.value)}
-                  >
-                    {domains.map(d => (
-                      <option key={d.id} value={d.name}>{d.name}</option>
-                    ))}
-                  </select>
+                  <label>SMTP Port</label>
+                  <input 
+                    type="number" 
+                    className="form-input" 
+                    placeholder="587" 
+                    value={port}
+                    onChange={(e) => setPort(e.target.value)}
+                    required
+                  />
                 </div>
               </div>
 
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                <input 
+                  type="checkbox" 
+                  id="secure"
+                  style={{ cursor: 'pointer' }}
+                  checked={secure}
+                  onChange={(e) => setSecure(e.target.checked)}
+                />
+                <label htmlFor="secure" style={{ margin: 0, cursor: 'pointer' }}>Use SSL Encryption (recommended for Port 465)</label>
+              </div>
+
               <div className="form-group">
-                <label>SMTP Password</label>
+                <label>Auth Username (Email Address)</label>
+                <input 
+                  type="email" 
+                  className="form-input" 
+                  placeholder="your.name@gmail.com" 
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Auth Password (or App Password)</label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input 
-                    type="text" 
+                    type={showPassword ? 'text' : 'password'} 
                     className="form-input" 
-                    placeholder="Enter password" 
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="••••••••" 
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     required
                   />
                   <button 
                     type="button" 
                     className="btn btn-secondary"
-                    title="Generate Password"
-                    onClick={() => setNewPassword(generateRandomPassword())}
+                    onClick={() => setShowPassword(!showPassword)}
                   >
-                    <RefreshCw size={14} />
+                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
               </div>
 
-              <div className="form-group">
-                <label>Daily Sending Limit: <strong style={{ color: '#00A8FF' }}>{newSendLimit.toLocaleString()} emails/day</strong></label>
-                <input 
-                  type="range" 
-                  min="500" 
-                  max="10000" 
-                  step="500"
-                  className="form-input"
-                  style={{ padding: 0 }}
-                  value={newSendLimit} 
-                  onChange={(e) => setNewSendLimit(parseInt(e.target.value))}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                  <span>500/day</span>
-                  <span>5,000/day</span>
-                  <span>10,000/day</span>
-                </div>
-              </div>
-
               <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowAddMailboxModal(false)}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAddModal(false)}>
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  Create SMTP Account
+                  Save Connection
                 </button>
               </div>
             </form>
@@ -541,114 +391,63 @@ export default function MailboxManager({ token, API_URL }) {
         </div>
       )}
 
-      {/* Modal: Edit SMTP Account (Limit / Password) */}
-      {showEditModal && selectedMailbox && (
+      {/* Send Test Email Modal */}
+      {showTestModal && selectedSmtp && (
         <div className="modal-overlay">
-          <div className="modal-content">
-            <h3 className="modal-title">Configure SMTP: {selectedMailbox.email}</h3>
+          <div className="modal-content" style={{ maxWidth: '550px' }}>
+            <h3 className="modal-title">Send Test Message via {selectedSmtp.name}</h3>
 
-            {editError && (
-              <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
-                {editError}
+            {sendError && (
+              <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '0.75rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
+                {sendError}
               </div>
             )}
 
-            <form onSubmit={handleEditMailboxSubmit}>
+            <form onSubmit={handleSendTestMail}>
               <div className="form-group">
-                <label>Reset SMTP Password (leave empty to keep current)</label>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="New password" 
-                    value={editPassword}
-                    onChange={(e) => setEditPassword(e.target.value)}
-                  />
-                  <button 
-                    type="button" 
-                    className="btn btn-secondary"
-                    onClick={() => setEditPassword(generateRandomPassword())}
-                  >
-                    <RefreshCw size={14} />
-                  </button>
-                </div>
+                <label>From: <strong>{selectedSmtp.username}</strong></label>
               </div>
 
               <div className="form-group">
-                <label>Adjust Daily Sending Limit: <strong style={{ color: '#00A8FF' }}>{editSendLimit.toLocaleString()} emails/day</strong></label>
-                <input 
-                  type="range" 
-                  min="500" 
-                  max="10000" 
-                  step="500"
-                  className="form-input"
-                  style={{ padding: 0 }}
-                  value={editSendLimit} 
-                  onChange={(e) => setEditSendLimit(parseInt(e.target.value))}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                  <span>500/day</span>
-                  <span>5,000/day</span>
-                  <span>10,000/day</span>
-                </div>
-              </div>
-
-              <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowEditModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Save Changes
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Add Alias */}
-      {showAddAliasModal && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <h3 className="modal-title">New Virtual Redirect Alias</h3>
-
-            {aliasError && (
-              <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
-                {aliasError}
-              </div>
-            )}
-
-            <form onSubmit={handleAddAlias}>
-              <div className="form-group">
-                <label>Source SMTP Address (Receiving alias)</label>
+                <label>Recipient Address (To)</label>
                 <input 
                   type="email" 
                   className="form-input" 
-                  placeholder="info@yourdomain.com" 
-                  value={aliasSource}
-                  onChange={(e) => setAliasSource(e.target.value)}
+                  placeholder="receiver@example.com" 
+                  value={recipient}
+                  onChange={(e) => setRecipient(e.target.value)}
                   required
                 />
               </div>
 
               <div className="form-group">
-                <label>Destination Address (Where emails redirect to)</label>
+                <label>Subject</label>
                 <input 
-                  type="email" 
+                  type="text" 
                   className="form-input" 
-                  placeholder="personal.email@gmail.com" 
-                  value={aliasDest}
-                  onChange={(e) => setAliasDest(e.target.value)}
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
                   required
                 />
               </div>
 
+              <div className="form-group">
+                <label>Email Body Text (leave blank to send default template)</label>
+                <textarea 
+                  className="form-input" 
+                  style={{ height: '100px', resize: 'vertical' }}
+                  placeholder="Write a custom test message here..."
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                />
+              </div>
+
               <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowAddAliasModal(false)}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowTestModal(false)} disabled={sendLoading}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Create Forward
+                <button type="submit" className="btn btn-primary" disabled={sendLoading}>
+                  {sendLoading ? <RefreshCw size={14} className="animate-spin" /> : 'Send Email'}
                 </button>
               </div>
             </form>

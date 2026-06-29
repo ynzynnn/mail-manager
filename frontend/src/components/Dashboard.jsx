@@ -1,27 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Globe, 
-  Mail, 
-  List, 
+  Server, 
+  CheckCircle, 
+  XCircle, 
   Activity, 
-  ShieldCheck, 
   HardDrive, 
-  Zap 
+  Zap,
+  RefreshCw
 } from 'lucide-react';
 
 export default function Dashboard({ token, API_URL, sysStatus }) {
   const [stats, setStats] = useState({
-    domains: 0,
-    mailboxes: 0,
-    aliases: 0,
-    queue: 0,
-    storage: { total: 0, used: 0 }
+    total_smtps: 0,
+    active_smtps: 0,
+    total_sent: 0,
+    total_failed: 0
   });
+  const [smtpList, setSmtpList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [verifyingId, setVerifyingId] = useState(null);
 
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 5000);
+    fetchSmtps();
+    const interval = setInterval(() => {
+      fetchStats();
+      fetchSmtps();
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -34,137 +39,156 @@ export default function Dashboard({ token, API_URL, sysStatus }) {
         const data = await res.json();
         setStats(data);
       }
-      setLoading(false);
     } catch (err) {
-      console.error('Error fetching dashboard stats:', err);
+      console.error('Error fetching stats:', err);
     }
   };
 
-  const formatBytes = (bytes, decimals = 2) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  const fetchSmtps = async () => {
+    try {
+      const res = await fetch(`${API_URL}/smtps`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSmtpList(data);
+      }
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching smtps:', err);
+    }
   };
 
-  const getStoragePercentage = () => {
-    if (!stats.storage.total) return 0;
-    return Math.min(100, Math.round((stats.storage.used / stats.storage.total) * 100));
+  const handleVerifySmtp = async (id) => {
+    setVerifyingId(id);
+    try {
+      const res = await fetch(`${API_URL}/smtps/${id}/verify`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (data.success) {
+          alert('Handshake Successful! SMTP configuration is verified online.');
+        } else {
+          alert('Verification Failed:\n' + data.error);
+        }
+        fetchSmtps();
+        fetchStats();
+      }
+    } catch (err) {
+      alert('Verification request failed. Connection error.');
+    } finally {
+      setVerifyingId(null);
+    }
+  };
+
+  const getSuccessRate = () => {
+    const total = stats.total_sent + stats.total_failed;
+    if (total === 0) return 0;
+    return Math.round((stats.total_sent / total) * 100);
   };
 
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
-        <p style={{ color: '#94a3b8' }}>Loading server statistics...</p>
+        <p style={{ color: '#94a3b8' }}>Loading SMTP dashboard...</p>
       </div>
     );
   }
 
-  // Draw smooth SVG path for SMTP Traffic
+  // Draw smooth SVG path for SMTP activity
   const getSvgPath = () => {
     if (!sysStatus.traffic || sysStatus.traffic.length === 0) return '';
     const width = 600;
     const height = 150;
-    const maxVal = Math.max(...sysStatus.traffic.flatMap(t => [t.sent, t.received]), 100);
+    const maxVal = Math.max(...sysStatus.traffic.map(t => t.sent), 50);
     
-    // Scale values
     const points = sysStatus.traffic.map((t, idx) => {
       const x = (idx / (sysStatus.traffic.length - 1)) * (width - 40) + 20;
       const ySent = height - ((t.sent / maxVal) * (height - 40) + 20);
-      const yReceived = height - ((t.received / maxVal) * (height - 40) + 20);
-      return { x, ySent, yReceived };
+      return { x, ySent };
     });
 
     const sentPath = `M ${points[0].x} ${points[0].ySent} ` + points.slice(1).map(p => `L ${p.x} ${p.ySent}`).join(' ');
-    const receivedPath = `M ${points[0].x} ${points[0].yReceived} ` + points.slice(1).map(p => `L ${p.x} ${p.yReceived}`).join(' ');
-
-    return { sentPath, receivedPath, points };
+    return { sentPath, points };
   };
 
-  const { sentPath, receivedPath, points } = getSvgPath();
+  const { sentPath, points } = getSvgPath();
 
   return (
     <div>
       <div style={{ marginBottom: '2rem' }}>
-        <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>SMTP Server Overview</h2>
-        <p style={{ color: '#94a3b8' }}>Real-time SMTP status and queue monitor.</p>
+        <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>SMTP Dashboard</h2>
+        <p style={{ color: '#94a3b8' }}>Monitor SMTP server connectivity profiles, send history, and connection handshakes.</p>
       </div>
 
       {/* Counters Grid */}
       <div className="card-grid">
         <div className="card">
           <div className="card-header-row">
-            <span className="card-title">SMTP Domains</span>
+            <span className="card-title">SMTP Configurations</span>
             <div className="icon-wrapper">
-              <Globe size={20} />
+              <Server size={20} />
             </div>
           </div>
-          <div className="card-value">{stats.domains}</div>
-          <div className="card-desc">Active sending domains configured</div>
+          <div className="card-value">{stats.total_smtps}</div>
+          <div className="card-desc">Total registered profiles</div>
         </div>
 
         <div className="card">
           <div className="card-header-row">
-            <span className="card-title">SMTP Accounts</span>
-            <div className="icon-wrapper blue">
-              <Mail size={20} />
-            </div>
-          </div>
-          <div className="card-value">{stats.mailboxes}</div>
-          <div className="card-desc">Active SMTP authentication credentials</div>
-        </div>
-
-        <div className="card">
-          <div className="card-header-row">
-            <span className="card-title">Routing Aliases</span>
+            <span className="card-title">Verified Servers</span>
             <div className="icon-wrapper success">
-              <List size={20} />
+              <CheckCircle size={20} />
             </div>
           </div>
-          <div className="card-value">{stats.aliases}</div>
-          <div className="card-desc">Virtual redirection rules mapped</div>
+          <div className="card-value">{stats.active_smtps}</div>
+          <div className="card-desc">Handshake verified online</div>
         </div>
 
         <div className="card">
           <div className="card-header-row">
-            <span className="card-title">SMTP Mail Queue</span>
-            <div className="icon-wrapper warning">
+            <span className="card-title">Emails Delivered</span>
+            <div className="icon-wrapper blue">
               <Activity size={20} />
             </div>
           </div>
-          <div className="card-value">{stats.queue}</div>
-          <div className="card-desc">Messages currently in delivery queue</div>
+          <div className="card-value">{stats.total_sent}</div>
+          <div className="card-desc">Successful SMTP dispatches</div>
+        </div>
+
+        <div className="card">
+          <div className="card-header-row">
+            <span className="card-title">Failed Dispatches</span>
+            <div className="icon-wrapper warning" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
+              <XCircle size={20} />
+            </div>
+          </div>
+          <div className="card-value">{stats.total_failed}</div>
+          <div className="card-desc">Errors / handshakes refused</div>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
-        {/* Traffic Chart Card */}
+        {/* Activity Chart */}
         <div className="panel-card" style={{ padding: '1.5rem', margin: 0 }}>
           <h3 style={{ fontSize: '1.15rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Zap size={18} style={{ color: '#00A8FF' }} />
-            SMTP Outbound & Inbound Email Activity
+            SMTP Outgoing Dispatch Load (Hourly Activity)
           </h3>
 
           <div style={{ position: 'relative', width: '100%', height: '180px', overflow: 'hidden' }}>
             {sysStatus.traffic && sysStatus.traffic.length > 0 ? (
               <svg viewBox="0 0 600 150" width="100%" height="100%" preserveAspectRatio="none">
-                {/* Grids */}
                 <line x1="20" y1="20" x2="580" y2="20" stroke="#1e293b" strokeDasharray="3,3" />
                 <line x1="20" y1="75" x2="580" y2="75" stroke="#1e293b" strokeDasharray="3,3" />
                 <line x1="20" y1="130" x2="580" y2="130" stroke="#1e293b" strokeDasharray="3,3" />
                 
-                {/* Paths */}
                 <path d={sentPath} fill="none" stroke="#00A8FF" strokeWidth="2.5" strokeLinecap="round" />
-                <path d={receivedPath} fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" />
 
-                {/* Points */}
                 {points.map((p, idx) => (
-                  <g key={idx}>
-                    <circle cx={p.x} cy={p.ySent} r="4" fill="#00A8FF" />
-                    <circle cx={p.x} cy={p.yReceived} r="4" fill="#2563eb" />
-                  </g>
+                  <circle key={idx} cx={p.x} cy={p.ySent} r="4" fill="#00A8FF" />
                 ))}
               </svg>
             ) : (
@@ -177,76 +201,87 @@ export default function Dashboard({ token, API_URL, sysStatus }) {
               <span key={idx} style={{ fontSize: '0.8rem', color: '#64748b' }}>{t.hour}</span>
             ))}
           </div>
-
-          <div style={{ display: 'flex', gap: '1.5rem', marginTop: '1.5rem', borderTop: '1px solid #1e293b', paddingTop: '1rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ width: '12px', height: '12px', borderRadius: '3px', backgroundColor: '#00A8FF' }}></span>
-              <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>SMTP Outbound (Sent)</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ width: '12px', height: '12px', borderRadius: '3px', backgroundColor: '#2563eb' }}></span>
-              <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>SMTP Inbound (Received)</span>
-            </div>
-          </div>
         </div>
 
-        {/* Server & Storage Info Card */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div className="panel-card" style={{ padding: '1.5rem', margin: 0, flex: 1 }}>
-            <h3 style={{ fontSize: '1.15rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <HardDrive size={18} style={{ color: '#00A8FF' }} />
-              Queue & Log Storage
-            </h3>
-            
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-              <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Disk Space Allocation</span>
-              <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>{getStoragePercentage()}%</span>
-            </div>
-            
-            <div className="stat-bar-container" style={{ height: '10px', marginBottom: '1rem' }}>
-              <div 
-                className="stat-bar" 
-                style={{ 
-                  width: `${getStoragePercentage()}%`, 
-                  background: 'linear-gradient(90deg, #00A8FF, #2563eb)' 
-                }}
-              ></div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.85rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Provisioned Max Quota:</span>
-                <span>{formatBytes(stats.storage.total)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Queue & Log Bytes Used:</span>
-                <span>{formatBytes(stats.storage.used)}</span>
-              </div>
+        {/* Deliverability Rating Card */}
+        <div className="panel-card" style={{ padding: '1.5rem', margin: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+          <h3 style={{ fontSize: '1.15rem', marginBottom: '1.5rem', alignSelf: 'flex-start' }}>Deliverability Success</h3>
+          
+          <div style={{ position: 'relative', width: '120px', height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
+            <svg width="120" height="120" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="50" fill="none" stroke="#1e293b" strokeWidth="10" />
+              <circle 
+                cx="60" 
+                cy="60" 
+                r="50" 
+                fill="none" 
+                stroke="#00A8FF" 
+                strokeWidth="10" 
+                strokeDasharray={`${2 * Math.PI * 50}`}
+                strokeDashoffset={`${2 * Math.PI * 50 * (1 - getSuccessRate() / 100)}`}
+                strokeLinecap="round"
+                transform="rotate(-90 60 60)"
+              />
+            </svg>
+            <div style={{ position: 'absolute', fontSize: '1.5rem', fontWeight: 'bold', fontFamily: 'Outfit' }}>
+              {getSuccessRate()}%
             </div>
           </div>
-
-          <div className="panel-card" style={{ padding: '1.5rem', margin: 0 }}>
-            <h3 style={{ fontSize: '1.15rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <ShieldCheck size={18} style={{ color: '#10b981' }} />
-              SMTP Daemon Ports
-            </h3>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.85rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: '#94a3b8' }}>SMTP Mail Transport (Postfix)</span>
-                <span className="badge badge-success"><span className="badge-dot"></span> Port 25</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: '#94a3b8' }}>SMTP Submission (Postfix TLS)</span>
-                <span className="badge badge-success"><span className="badge-dot"></span> Port 587</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: '#94a3b8' }}>SMTP Secure SSL (Postfix)</span>
-                <span className="badge badge-success"><span className="badge-dot"></span> Port 465</span>
-              </div>
-            </div>
+          
+          <div style={{ fontSize: '0.85rem', color: '#94a3b8', textAlign: 'center' }}>
+            Total Email Dispatches: {(stats.total_sent + stats.total_failed).toLocaleString()}
           </div>
         </div>
+      </div>
+
+      {/* SMTP Profile Status List */}
+      <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#f8fafc' }}>Registered Connections Status</h3>
+      <div className="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Profile Name</th>
+              <th>SMTP Host & Port</th>
+              <th>Auth Username</th>
+              <th>Handshake Status</th>
+              <th style={{ textAlign: 'right' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {smtpList.length === 0 ? (
+              <tr>
+                <td colSpan="5" style={{ textAlign: 'center', color: '#64748b', padding: '3rem' }}>
+                  No SMTP profiles configured. Navigate to SMTP Profiles to add one.
+                </td>
+              </tr>
+            ) : (
+              smtpList.map((smtp) => (
+                <tr key={smtp.id}>
+                  <td style={{ fontWeight: 600 }}>{smtp.name}</td>
+                  <td><code>{smtp.host}:{smtp.port}</code> {smtp.secure === 1 ? '(SSL)' : ''}</td>
+                  <td>{smtp.username}</td>
+                  <td>
+                    <span className={`badge ${
+                      smtp.status === 'verified' ? 'badge-success' : 
+                      smtp.status === 'failed' ? 'badge-danger' : 'badge-warning'
+                    }`}>
+                      <span className="badge-dot"></span> {smtp.status}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button 
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleVerifySmtp(smtp.id)}
+                      disabled={verifyingId === smtp.id}
+                    >
+                      {verifyingId === smtp.id ? <RefreshCw size={12} className="animate-spin" /> : 'Check Connection'}
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

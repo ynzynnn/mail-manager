@@ -1,17 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import Dashboard from './components/Dashboard';
-import DomainManager from './components/DomainManager';
 import MailboxManager from './components/MailboxManager';
 import QueueLogs from './components/QueueLogs';
 import { 
   Server, 
-  Globe, 
   Mail, 
   List, 
   LogOut, 
-  ShieldCheck,
-  Cpu,
-  HardDrive
+  ShieldCheck
 } from 'lucide-react';
 
 export default function App() {
@@ -105,9 +101,9 @@ export default function App() {
         
         <div className="login-card">
           <div className="login-logo">
-            <span>SEPTACLOUD</span> Mail
+            <span>SEPTACLOUD</span> SMTP
           </div>
-          <div className="login-title">SMTP Server Manager</div>
+          <div className="login-title">SMTP Connection Manager</div>
           
           {authError && (
             <div style={{ 
@@ -154,7 +150,7 @@ export default function App() {
             </div>
             
             <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
-              Sign In to SMTP Panel
+              Sign In to SMTP Manager
             </button>
           </form>
         </div>
@@ -187,20 +183,11 @@ export default function App() {
           </li>
           <li>
             <a 
-              className={`menu-item ${activeView === 'domains' ? 'active' : ''}`}
-              onClick={() => setActiveView('domains')}
-            >
-              <Globe size={18} />
-              SMTP Domains
-            </a>
-          </li>
-          <li>
-            <a 
               className={`menu-item ${activeView === 'mailboxes' ? 'active' : ''}`}
               onClick={() => setActiveView('mailboxes')}
             >
               <Mail size={18} />
-              SMTP Accounts
+              SMTP Profiles
             </a>
           </li>
           <li>
@@ -209,7 +196,7 @@ export default function App() {
               onClick={() => setActiveView('queue')}
             >
               <List size={18} />
-              Queue & Logs
+              Sending Logs & Console
             </a>
           </li>
         </ul>
@@ -240,7 +227,7 @@ export default function App() {
           
           <div className="system-stat-row">
             <div className="stat-info">
-              <span>Disk Storage</span>
+              <span>Disk Space</span>
               <span>{sysStatus.disk}%</span>
             </div>
             <div className="stat-bar-container">
@@ -260,7 +247,7 @@ export default function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <ShieldCheck size={20} className="text-primary" style={{ color: '#00A8FF' }} />
           <span style={{ fontSize: '0.9rem', fontWeight: 500, color: '#94a3b8' }}>
-            Postfix SMTP MTA Active
+            SMTP Connections Controller Active
           </span>
         </div>
         
@@ -278,7 +265,6 @@ export default function App() {
       {/* Main Content Area */}
       <main className="main-content">
         {activeView === 'dashboard' && <Dashboard token={token} API_URL={API_URL} sysStatus={sysStatus} />}
-        {activeView === 'domains' && <DomainManager token={token} API_URL={API_URL} />}
         {activeView === 'mailboxes' && <MailboxManager token={token} API_URL={API_URL} />}
         {activeView === 'queue' && <QueueLogs token={token} API_URL={API_URL} />}
       </main>

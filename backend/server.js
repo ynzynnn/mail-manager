@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import { query, get, run } from './database.js';
+import { verifyConnection, sendTestEmail } from './smtp-tester.js';
 
 dotenv.config();
 
@@ -99,407 +100,246 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// DASHBOARD & MONITORING ROUTES
+// DASHBOARD STATS
 // ==========================================
 
 app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
   try {
-    const domainCount = await get("SELECT COUNT(*) as count FROM domains");
-    const mailboxCount = await get("SELECT COUNT(*) as count FROM mailboxes");
-    const aliasCount = await get("SELECT COUNT(*) as count FROM aliases");
-    const queueCount = await get("SELECT COUNT(*) as count FROM queue");
-    const totalStorage = await get("SELECT SUM(quota_bytes) as total, SUM(bytes_used) as used FROM mailboxes");
+    const totalSmtps = await get("SELECT COUNT(*) as count FROM smtp_configs");
+    const activeSmtps = await get("SELECT COUNT(*) as count FROM smtp_configs WHERE status = 'verified'");
+    const totalSent = await get("SELECT COUNT(*) as count FROM send_logs WHERE status = 'sent'");
+    const totalFailed = await get("SELECT COUNT(*) as count FROM send_logs WHERE status = 'failed'");
 
     res.json({
-      domains: domainCount.count,
-      mailboxes: mailboxCount.count,
-      aliases: aliasCount.count,
-      queue: queueCount.count,
-      storage: {
-        total: totalStorage.total || 0,
-        used: totalStorage.used || 0
-      }
+      total_smtps: totalSmtps.count,
+      active_smtps: activeSmtps.count,
+      total_sent: totalSent.count,
+      total_failed: totalFailed.count
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch statistics' });
+    res.status(500).json({ error: 'Failed to fetch dashboard stats' });
   }
 });
 
 // Helper to simulate system stats with a slight variation
 let lastCpu = 12.5;
 let lastRam = 48.2;
-let lastDisk = 32.1;
+let lastDisk = 15.4;
 
 app.get('/api/dashboard/system-status', authenticateToken, (req, res) => {
-  // Add small random oscillations to mimic real monitoring metrics
   lastCpu = Math.max(2, Math.min(99, +(lastCpu + (Math.random() * 4 - 2)).toFixed(1)));
   lastRam = Math.max(10, Math.min(95, +(lastRam + (Math.random() * 0.4 - 0.2)).toFixed(1)));
-  
-  // Storage is more static
-  const disk = lastDisk;
 
-  // Mock hourly SMTP traffic data (sent / received)
+  // Mock sending history chart over time
   const trafficData = [
-    { hour: '08:00', sent: 124, received: 184 },
-    { hour: '09:00', sent: 245, received: 312 },
-    { hour: '10:00', sent: 412, received: 450 },
-    { hour: '11:00', sent: 356, received: 390 },
-    { hour: '12:00', sent: 210, received: 280 },
-    { hour: '13:00', sent: 289, received: 340 },
-    { hour: '14:00', sent: 388, received: 410 },
+    { hour: '08:00', sent: 12, received: 0 },
+    { hour: '09:00', sent: 24, received: 1 },
+    { hour: '10:00', sent: 41, received: 0 },
+    { hour: '11:00', sent: 35, received: 3 },
+    { hour: '12:00', sent: 21, received: 0 },
+    { hour: '13:00', sent: 28, received: 2 },
+    { hour: '14:00', sent: 38, received: 0 },
   ];
 
   res.json({
     cpu: lastCpu,
     ram: lastRam,
-    disk: disk,
-    uptime: '14 days, 6 hours, 23 minutes',
-    postfix_status: 'running',
-    dovecot_status: 'running',
-    rspamd_status: 'running',
+    disk: lastDisk,
+    uptime: '14 days, 6 hours',
     traffic: trafficData
   });
 });
 
 // ==========================================
-// DOMAIN ROUTES
+// SMTP PROFILES CRUD ROUTES
 // ==========================================
 
-app.get('/api/domains', authenticateToken, async (req, res) => {
+app.get('/api/smtps', authenticateToken, async (req, res) => {
   try {
-    const domains = await query("SELECT * FROM domains ORDER BY name ASC");
-    res.json(domains);
+    const smtps = await query("SELECT id, name, host, port, secure, username, status, created_at FROM smtp_configs ORDER BY id DESC");
+    res.json(smtps);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch domains' });
+    res.status(500).json({ error: 'Failed to fetch SMTP configurations' });
   }
 });
 
-app.post('/api/domains', authenticateToken, async (req, res) => {
-  const { name, dkim_selector } = req.body;
-  if (!name) {
-    return res.status(400).json({ error: 'Domain name is required' });
+app.post('/api/smtps', authenticateToken, async (req, res) => {
+  const { name, host, port, secure, username, password } = req.body;
+  if (!name || !host || !port || !username || !password) {
+    return res.status(400).json({ error: 'Name, host, port, username, and password are required' });
   }
 
-  const selector = dkim_selector || 'default';
-  // Simulate DKIM keypair generation
-  const mockDkimPublic = `v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA${Math.random().toString(36).substring(2, 15).toUpperCase()}...`;
-  const mockDkimPrivate = `-----BEGIN RSA PRIVATE KEY-----\n${Math.random().toString(36).substring(2, 15).repeat(5)}\n-----END RSA PRIVATE KEY-----`;
-  
-  const spf = 'v=spf1 mx ~all';
-  const dmarc = `v=DMARC1; p=none; rua=mailto:dmarc@${name}`;
+  const isSecure = secure ? 1 : 0;
 
   try {
-    await run(
-      "INSERT INTO domains (name, dkim_selector, spf_value, dmarc_value, dkim_public, dkim_private, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [name, selector, spf, dmarc, mockDkimPublic, mockDkimPrivate, 'active']
+    const result = await run(
+      "INSERT INTO smtp_configs (name, host, port, secure, username, password, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [name, host, parseInt(port), isSecure, username, password, 'untested']
     );
 
-    await logActivity('INFO', 'postfix', `Domain ${name} configured in postfix configuration maps`);
-    await logActivity('INFO', 'panel', `Domain ${name} added successfully`);
+    await logActivity('INFO', 'smtp-client', `Added SMTP Profile: "${name}" (${host}:${port})`);
     
-    res.status(201).json({ message: 'Domain created successfully', name });
+    res.status(201).json({ id: result.id, message: 'SMTP Profile created successfully' });
   } catch (err) {
-    if (err.message.includes('UNIQUE')) {
-      return res.status(400).json({ error: 'Domain already exists' });
-    }
-    res.status(500).json({ error: 'Failed to create domain' });
+    res.status(500).json({ error: 'Failed to create SMTP Profile' });
   }
 });
 
-app.delete('/api/domains/:name', authenticateToken, async (req, res) => {
-  const { name } = req.params;
-  try {
-    // Delete domain, and warning/cleanup mailboxes associated
-    const mailboxes = await query("SELECT COUNT(*) as count FROM mailboxes WHERE domain = ?", [name]);
-    if (mailboxes[0].count > 0) {
-      return res.status(400).json({ error: 'Cannot delete domain. Delete all email accounts associated with it first.' });
-    }
-
-    await run("DELETE FROM domains WHERE name = ?", [name]);
-    await logActivity('INFO', 'postfix', `Domain ${name} removed from postfix maps`);
-    await logActivity('INFO', 'panel', `Domain ${name} deleted`);
-    
-    res.json({ message: 'Domain deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to delete domain' });
-  }
-});
-
-// ==========================================
-// MAILBOX ROUTES
-// ==========================================
-
-app.get('/api/mailboxes', authenticateToken, async (req, res) => {
-  try {
-    const mailboxes = await query("SELECT id, username, domain, email, quota_bytes, bytes_used, status, created_at FROM mailboxes ORDER BY email ASC");
-    res.json(mailboxes);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch mailboxes' });
-  }
-});
-
-app.post('/api/mailboxes', authenticateToken, async (req, res) => {
-  const { username, domain, password, quota_bytes } = req.body;
-  if (!username || !domain || !password) {
-    return res.status(400).json({ error: 'Username, domain, and password are required' });
-  }
-
-  const email = `${username}@${domain}`.toLowerCase();
-  const quota = quota_bytes || 2147483648; // Default 2GB
-
-  try {
-    // Check if domain exists
-    const domainCheck = await get("SELECT * FROM domains WHERE name = ?", [domain]);
-    if (!domainCheck) {
-      return res.status(404).json({ error: 'Parent domain not configured. Please add the domain first.' });
-    }
-
-    const salt = bcrypt.genSaltSync(10);
-    const hashedPassword = bcrypt.hashSync(password, salt);
-
-    await run(
-      "INSERT INTO mailboxes (username, domain, email, password, quota_bytes, bytes_used, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [username, domain, email, hashedPassword, quota, 0, 'active']
-    );
-
-    await logActivity('INFO', 'dovecot', `Mailbox ${email} provisioned with quota ${quota} bytes`);
-    await logActivity('INFO', 'postfix', `Local alias generated for virtual mailbox ${email}`);
-    
-    res.status(201).json({ message: 'Mailbox created successfully', email });
-  } catch (err) {
-    if (err.message.includes('UNIQUE')) {
-      return res.status(400).json({ error: 'Email address already exists' });
-    }
-    res.status(500).json({ error: 'Failed to create mailbox' });
-  }
-});
-
-app.put('/api/mailboxes/:email', authenticateToken, async (req, res) => {
-  const { email } = req.params;
-  const { password, quota_bytes, status } = req.body;
-
-  try {
-    const mailbox = await get("SELECT * FROM mailboxes WHERE email = ?", [email]);
-    if (!mailbox) {
-      return res.status(404).json({ error: 'Mailbox not found' });
-    }
-
-    if (password) {
-      const salt = bcrypt.genSaltSync(10);
-      const hashedPassword = bcrypt.hashSync(password, salt);
-      await run("UPDATE mailboxes SET password = ? WHERE email = ?", [hashedPassword, email]);
-      await logActivity('INFO', 'dovecot', `Password updated for mailbox ${email}`);
-    }
-
-    if (quota_bytes !== undefined) {
-      await run("UPDATE mailboxes SET quota_bytes = ? WHERE email = ?", [quota_bytes, email]);
-      await logActivity('INFO', 'dovecot', `Quota changed for mailbox ${email} to ${quota_bytes} bytes`);
-    }
-
-    if (status) {
-      await run("UPDATE mailboxes SET status = ? WHERE email = ?", [status, email]);
-      await logActivity('INFO', 'dovecot', `Account status for ${email} set to ${status}`);
-    }
-
-    res.json({ message: 'Mailbox updated successfully', email });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to update mailbox' });
-  }
-});
-
-app.delete('/api/mailboxes/:email', authenticateToken, async (req, res) => {
-  const { email } = req.params;
-  try {
-    await run("DELETE FROM mailboxes WHERE email = ?", [email]);
-    await logActivity('INFO', 'dovecot', `Mailbox ${email} de-provisioned and storage marked for deletion`);
-    await logActivity('INFO', 'panel', `Mailbox ${email} deleted`);
-    res.json({ message: 'Mailbox deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to delete mailbox' });
-  }
-});
-
-// ==========================================
-// ALIAS ROUTES
-// ==========================================
-
-app.get('/api/aliases', authenticateToken, async (req, res) => {
-  try {
-    const aliases = await query("SELECT * FROM aliases ORDER BY source_email ASC");
-    res.json(aliases);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch aliases' });
-  }
-});
-
-app.post('/api/aliases', authenticateToken, async (req, res) => {
-  const { source_email, destination_email } = req.body;
-  if (!source_email || !destination_email) {
-    return res.status(400).json({ error: 'Source and destination emails are required' });
-  }
-
-  const domain = source_email.split('@')[1];
-  if (!domain) {
-    return res.status(400).json({ error: 'Invalid source email format' });
-  }
-
-  try {
-    // Check if domain exists
-    const domainCheck = await get("SELECT * FROM domains WHERE name = ?", [domain]);
-    if (!domainCheck) {
-      return res.status(404).json({ error: 'Domain for source email is not configured on this server.' });
-    }
-
-    await run(
-      "INSERT INTO aliases (source_email, destination_email, domain, status) VALUES (?, ?, ?, ?)",
-      [source_email.toLowerCase(), destination_email.toLowerCase(), domain, 'active']
-    );
-
-    await logActivity('INFO', 'postfix', `Virtual alias map updated: ${source_email} -> ${destination_email}`);
-    res.status(201).json({ message: 'Alias created successfully' });
-  } catch (err) {
-    if (err.message.includes('UNIQUE')) {
-      return res.status(400).json({ error: 'Alias source address already exists' });
-    }
-    res.status(500).json({ error: 'Failed to create alias' });
-  }
-});
-
-app.delete('/api/aliases/:source_email', authenticateToken, async (req, res) => {
-  const { source_email } = req.params;
-  try {
-    await run("DELETE FROM aliases WHERE source_email = ?", [source_email]);
-    await logActivity('INFO', 'postfix', `Virtual alias map removed: ${source_email}`);
-    res.json({ message: 'Alias deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to delete alias' });
-  }
-});
-
-// ==========================================
-// MAIL QUEUE & LOGS ROUTES
-// ==========================================
-
-app.get('/api/queue', authenticateToken, async (req, res) => {
-  try {
-    const queue = await query("SELECT * FROM queue ORDER BY arrival_time DESC");
-    res.json(queue);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch queue' });
-  }
-});
-
-// Flush mail queue (simulation)
-app.post('/api/queue/flush', authenticateToken, async (req, res) => {
-  try {
-    const queueItems = await query("SELECT * FROM queue");
-    if (queueItems.length === 0) {
-      return res.json({ message: 'Mail queue is empty. Nothing to flush.' });
-    }
-
-    await logActivity('INFO', 'postfix/qmgr', `Initiating SMTP queue flush (postqueue -f)`);
-    
-    // Simulate attempts to send queue items
-    for (const item of queueItems) {
-      if (item.status === 'deferred') {
-        // Randomly succeed or remain deferred
-        if (Math.random() > 0.4) {
-          // Success
-          await run("DELETE FROM queue WHERE id = ?", [item.id]);
-          await logActivity('INFO', 'postfix/smtp', `${item.message_id}: sent to relay ${item.recipient} (Success after retry)`);
-        } else {
-          // Keep deferred
-          await logActivity('WARN', 'postfix/smtp', `${item.message_id}: failed to send to ${item.recipient}. Keep deferred.`);
-        }
-      } else if (item.status === 'hold') {
-        // Items on hold are not flushed automatically, need release
-        await logActivity('INFO', 'postfix/qmgr', `${item.message_id}: held message skipped from automatic flush`);
-      } else {
-        // Sent successfully
-        await run("DELETE FROM queue WHERE id = ?", [item.id]);
-        await logActivity('INFO', 'postfix/smtp', `${item.message_id}: sent to remote relay for recipient ${item.recipient}`);
-      }
-    }
-
-    res.json({ message: 'Queue flush completed. Check logs for delivery updates.' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to flush queue' });
-  }
-});
-
-// Clear all messages in mail queue
-app.delete('/api/queue/clear', authenticateToken, async (req, res) => {
-  try {
-    await run("DELETE FROM queue");
-    await logActivity('INFO', 'postfix/qmgr', 'Mail queue purged completely (postsuper -d ALL)');
-    res.json({ message: 'Mail queue cleared successfully' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to clear queue' });
-  }
-});
-
-// Remove a specific message from queue
-app.delete('/api/queue/:id', authenticateToken, async (req, res) => {
+app.delete('/api/smtps/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
-    const item = await get("SELECT message_id FROM queue WHERE id = ?", [id]);
-    if (!item) {
-      return res.status(404).json({ error: 'Message not found in queue' });
+    const smtp = await get("SELECT name FROM smtp_configs WHERE id = ?", [id]);
+    if (!smtp) {
+      return res.status(404).json({ error: 'SMTP Profile not found' });
     }
-    await run("DELETE FROM queue WHERE id = ?", [id]);
-    await logActivity('INFO', 'postfix/qmgr', `Removed message ${item.message_id} from queue (postsuper -d)`);
-    res.json({ message: 'Message removed from queue' });
+
+    await run("DELETE FROM smtp_configs WHERE id = ?", [id]);
+    await logActivity('INFO', 'smtp-client', `Removed SMTP Profile: "${smtp.name}"`);
+    
+    res.json({ message: 'SMTP Profile deleted successfully' });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to delete message from queue' });
+    res.status(500).json({ error: 'Failed to delete SMTP profile' });
   }
 });
 
-// Get recent log items
+// ==========================================
+// SMTP VERIFICATION & SENDING TEST ROUTES
+// ==========================================
+
+// Tests connection handshake to SMTP Server
+app.post('/api/smtps/:id/verify', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const smtp = await get("SELECT * FROM smtp_configs WHERE id = ?", [id]);
+    if (!smtp) {
+      return res.status(404).json({ error: 'SMTP profile not found' });
+    }
+
+    await logActivity('INFO', 'smtp-tester', `Starting handshake verification with ${smtp.host}:${smtp.port}...`);
+    
+    const checkResult = await verifyConnection(smtp);
+
+    if (checkResult.success) {
+      await run("UPDATE smtp_configs SET status = 'verified' WHERE id = ?", [id]);
+      await logActivity('INFO', 'smtp-tester', `Handshake successful. SMTP Profile "${smtp.name}" is verified online.`);
+      res.json({ success: true, message: 'SMTP connection handshake verified successfully!' });
+    } else {
+      await run("UPDATE smtp_configs SET status = 'failed' WHERE id = ?", [id]);
+      await logActivity('ERROR', 'smtp-tester', `Handshake failed with ${smtp.host}:${smtp.port}: ${checkResult.error}`);
+      res.json({ success: false, error: checkResult.error });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error during verification' });
+  }
+});
+
+// Sends a test email via the configured SMTP profile
+app.post('/api/smtps/:id/send-test', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { recipient, subject, body } = req.body;
+
+  if (!recipient) {
+    return res.status(400).json({ error: 'Recipient email address is required' });
+  }
+
+  try {
+    const smtp = await get("SELECT * FROM smtp_configs WHERE id = ?", [id]);
+    if (!smtp) {
+      return res.status(404).json({ error: 'SMTP configuration not found' });
+    }
+
+    await logActivity('INFO', 'nodemailer', `Attempting to send email via "${smtp.name}" to ${recipient}...`);
+
+    const result = await sendTestEmail(smtp, recipient, subject, body);
+
+    if (result.success) {
+      await run(
+        "INSERT INTO send_logs (smtp_id, smtp_name, sender, recipient, subject, status) VALUES (?, ?, ?, ?, ?, ?)",
+        [smtp.id, smtp.name, smtp.username, recipient, subject || 'SMTP Server Test Connection', 'sent']
+      );
+      await logActivity('INFO', 'nodemailer', `Email successfully sent via "${smtp.name}" to ${recipient}. MessageID: ${result.messageId}`);
+      res.json({ success: true, message: 'Test email successfully sent!' });
+    } else {
+      await run(
+        "INSERT INTO send_logs (smtp_id, smtp_name, sender, recipient, subject, status, error_message) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [smtp.id, smtp.name, smtp.username, recipient, subject || 'SMTP Server Test Connection', 'failed', result.error]
+      );
+      await logActivity('WARN', 'nodemailer', `Failed to dispatch email via "${smtp.name}": ${result.error}`);
+      res.json({ success: false, error: result.error });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error during test dispatch' });
+  }
+});
+
+// ==========================================
+// TRANSMISSION LOGS & ACTIVITY LOGS
+// ==========================================
+
+// Get transmission history
+app.get('/api/logs/transmission', authenticateToken, async (req, res) => {
+  try {
+    const logs = await query("SELECT * FROM send_logs ORDER BY timestamp DESC LIMIT 100");
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch transmission logs' });
+  }
+});
+
+// Get recent panel activity console logs
 app.get('/api/logs', authenticateToken, async (req, res) => {
   try {
     const logs = await query("SELECT * FROM logs ORDER BY timestamp DESC LIMIT 100");
-    // Return logs in natural time order (oldest first) for scrolling console log view
     res.json(logs.reverse());
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch logs' });
+    res.status(500).json({ error: 'Failed to fetch activity logs' });
+  }
+});
+
+// Clear console log history
+app.delete('/api/logs', authenticateToken, async (req, res) => {
+  try {
+    await run("DELETE FROM logs");
+    await logActivity('INFO', 'panel', 'Console activity log history cleared.');
+    res.json({ message: 'Console log history cleared.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to clear logs' });
   }
 });
 
 // Mock/add a new log entry to simulate live SMTP flow
 app.post('/api/logs/mock', authenticateToken, async (req, res) => {
-  const mockSenders = ['hello@customer.com', 'jobs@developer.net', 'alert@server.mon', 'spam@viagra-deals.ru'];
-  const mockRecipients = ['admin@septacloud.net', 'support@septacloud.net', 'info@example.com', 'ceo@septacloud.net'];
-  const mockSubjects = ['Urgent Invoice #4023', 'Job application - Full Stack Node Developer', 'Disk usage alert: 92%', 'Buy cheap pills online fast'];
+  const mockSmtps = [
+    { id: 1, name: 'Gmail Relay' },
+    { id: 2, name: 'Outlook SMTP' },
+    { id: 3, name: 'Company SMTP Server' }
+  ];
   
-  const sender = mockSenders[Math.floor(Math.random() * mockSenders.length)];
+  const mockRecipients = ['client@partner.com', 'jobs@devteam.io', 'support@client.com', 'test-receiver@yahoo.com'];
+  const mockSubjects = ['Weekly Status Report', 'Connection verification test', 'Invoice #4023 payment check', 'Alert: API threshold exceeded'];
+  
   const recipient = mockRecipients[Math.floor(Math.random() * mockRecipients.length)];
   const subject = mockSubjects[Math.floor(Math.random() * mockSubjects.length)];
-  const size = Math.floor(Math.random() * 500000) + 1000;
-  const msgId = Math.random().toString(36).substring(2, 10).toUpperCase();
+  const selectedSmtp = mockSmtps[Math.floor(Math.random() * mockSmtps.length)];
+  
+  const isSuccess = Math.random() > 0.15; // 85% success rate
 
   try {
-    await logActivity('INFO', 'postfix/smtpd', `connect from mail-relay.random-sender.net[198.51.100.${Math.floor(Math.random() * 254) + 1}]`);
-    
-    // Check if spam
-    if (sender.includes('spam')) {
-      await logActivity('WARN', 'rspamd', `${sender} score 14.2 (High spam score)`);
-      // Put on hold in queue
+    if (isSuccess) {
       await run(
-        "INSERT INTO queue (message_id, sender, recipient, subject, size_bytes, status, error_message) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [msgId, sender, recipient, subject, size, 'hold', 'Flagged by rspamd policy']
+        "INSERT INTO send_logs (smtp_id, smtp_name, sender, recipient, subject, status) VALUES (?, ?, ?, ?, ?, ?)",
+        [selectedSmtp.id, selectedSmtp.name, `sender@${selectedSmtp.name.toLowerCase().replace(' ', '')}.com`, recipient, subject, 'sent']
       );
-      await logActivity('INFO', 'postfix/cleanup', `${msgId}: hold: Action from filter rspamd: ${sender}`);
+      await logActivity('INFO', 'nodemailer', `Email successfully sent via "${selectedSmtp.name}" to ${recipient}. MessageID: <MOCK_${Math.random().toString(36).substring(2, 10).toUpperCase()}@relay.com>`);
     } else {
-      // Normal transaction
-      await logActivity('INFO', 'postfix/cleanup', `${msgId}: message-id=<${msgId}@random-sender.net>`);
-      await logActivity('INFO', 'postfix/qmgr', `${msgId}: from=<${sender}>, size=${size}, nrcpt=1 (queue active)`);
-      
-      // Let it go to Dovecot
-      await logActivity('INFO', 'dovecot', `lmtp(${recipient}): Saved message to Maildir (uid=${Math.floor(Math.random()*1000)}, size=${size})`);
-      await logActivity('INFO', 'postfix/lmtp', `${msgId}: to=<${recipient}>, relay=127.0.0.1[127.0.0.1], delay=0.15, dsn=2.0.0, status=sent (250 2.0.0 Ok)`);
-      
-      // Update mailbox size_used in database
-      await run("UPDATE mailboxes SET bytes_used = bytes_used + ? WHERE email = ?", [size, recipient]);
+      const errorMsg = '535 5.7.8 Username and Password not accepted / Auth credentials rejected';
+      await run(
+        "INSERT INTO send_logs (smtp_id, smtp_name, sender, recipient, subject, status, error_message) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [selectedSmtp.id, selectedSmtp.name, `sender@${selectedSmtp.name.toLowerCase().replace(' ', '')}.com`, recipient, subject, 'failed', errorMsg]
+      );
+      await logActivity('WARN', 'nodemailer', `Failed to dispatch email via "${selectedSmtp.name}": ${errorMsg}`);
     }
     
     res.json({ message: 'Mock mail log entry generated' });

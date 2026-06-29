@@ -18,7 +18,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
 
 function initDb() {
   db.serialize(() => {
-    // 1. Users Table
+    // 1. Users Table (Admin accounts)
     db.run(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,70 +29,43 @@ function initDb() {
       )
     `);
 
-    // 2. Domains Table
+    // 2. SMTP Configurations Table
     db.run(`
-      CREATE TABLE IF NOT EXISTS domains (
+      CREATE TABLE IF NOT EXISTS smtp_configs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE,
-        dkim_selector TEXT DEFAULT 'default',
-        dkim_public TEXT,
-        dkim_private TEXT,
-        spf_value TEXT,
-        dmarc_value TEXT,
-        status TEXT DEFAULT 'active',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // 3. Mailboxes Table
-    db.run(`
-      CREATE TABLE IF NOT EXISTS mailboxes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        host TEXT,
+        port INTEGER,
+        secure INTEGER DEFAULT 0, -- 0 = False, 1 = True (SSL)
         username TEXT,
-        domain TEXT,
-        email TEXT UNIQUE,
         password TEXT,
-        quota_bytes INTEGER DEFAULT 2147483648, -- 2GB default
-        bytes_used INTEGER DEFAULT 0,
-        status TEXT DEFAULT 'active', -- active, suspended
+        status TEXT DEFAULT 'untested', -- verified, failed, untested
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // 4. Aliases Table
+    // 3. Email Transmission Logs Table
     db.run(`
-      CREATE TABLE IF NOT EXISTS aliases (
+      CREATE TABLE IF NOT EXISTS send_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        source_email TEXT UNIQUE,
-        destination_email TEXT,
-        domain TEXT,
-        status TEXT DEFAULT 'active',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // 5. Queue Table
-    db.run(`
-      CREATE TABLE IF NOT EXISTS queue (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        message_id TEXT UNIQUE,
+        smtp_id INTEGER,
+        smtp_name TEXT,
         sender TEXT,
         recipient TEXT,
         subject TEXT,
-        size_bytes INTEGER,
-        status TEXT DEFAULT 'active', -- active, deferred, hold
-        arrival_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-        error_message TEXT
+        status TEXT, -- sent, failed
+        error_message TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // 6. Logs Table
+    // 4. Panel Activity Logs Table (For console output)
     db.run(`
       CREATE TABLE IF NOT EXISTS logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        level TEXT DEFAULT 'INFO', -- INFO, WARN, ERROR
-        component TEXT DEFAULT 'system', -- postfix, dovecot, rspamd, panel
+        level TEXT DEFAULT 'INFO',
+        component TEXT DEFAULT 'panel',
         message TEXT
       )
     `);
@@ -102,11 +75,10 @@ function initDb() {
 }
 
 function seedData() {
-  // Check if admin user exists
+  // Seed default admin: admin / admin
   db.get("SELECT COUNT(*) as count FROM users", [], (err, row) => {
     if (err) return console.error(err);
     if (row.count === 0) {
-      // Seed default admin: admin / admin
       const salt = bcrypt.genSaltSync(10);
       const hashedPassword = bcrypt.hashSync('admin', salt);
       db.run("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", ['admin', hashedPassword, 'admin']);
@@ -114,15 +86,13 @@ function seedData() {
     }
   });
 
-  // Seed default logs with initial server startup messages only
+  // Seed default startup logs
   db.get("SELECT COUNT(*) as count FROM logs", [], (err, row) => {
     if (err) return console.error(err);
     if (row.count === 0) {
       const initialLogs = [
-        { level: 'INFO', comp: 'postfix', msg: 'daemon started -- version 3.6.4, configuration /etc/postfix' },
-        { level: 'INFO', comp: 'dovecot', msg: 'Master: Dovecot v2.3.16 starting up for imap, pop3, lmtp' },
-        { level: 'INFO', comp: 'rspamd', msg: 'rspamd v3.2 loading configuration, enabled modules: spf, dkim, dmarc, spamassassin' },
-        { level: 'INFO', comp: 'panel', msg: 'Mail Server Manager dashboard initialized. Awaiting configuration.' }
+        { level: 'INFO', comp: 'panel', msg: 'SMTP Connection Client Manager initialized successfully.' },
+        { level: 'INFO', comp: 'database', msg: 'SQLite connection active. SMTP profiles ready.' }
       ];
 
       initialLogs.forEach(l => {
@@ -133,7 +103,6 @@ function seedData() {
   });
 }
 
-// Wrapper database functions
 export function getDb() {
   return db;
 }
